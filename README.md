@@ -21,7 +21,8 @@ Instale com:
 # Coloque sua chave do LocationIQ aqui (crie conta gratuita em https://locationiq.com)
 LOCATIONIQ_API_KEY = 'SUA_CHAVE_DO_LOCATIONIQ_AQUI'   # ←←← ALTERE AQUI
 
-<img width="573" height="830" alt="image" src="https://github.com/user-attachments/assets/f67347e4-f1a2-4beb-b001-40dd795cfb6e" />
+<img width="503" height="368" alt="image" src="https://github.com/user-attachments/assets/435919f0-58e1-433a-a0f4-d619a55ab659" />
+
 
 
 <img width="441" height="690" alt="image" src="https://github.com/user-attachments/assets/e253fa4e-d77a-45dd-89b3-6c4c530a7a32" />
