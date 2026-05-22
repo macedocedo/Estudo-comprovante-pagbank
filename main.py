@@ -1,34 +1,37 @@
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
+from pymongo import MongoClient
 import os
 from datetime import datetime
 import base64
 import requests
 
-# ===================== FIREBASE =====================
-import firebase_admin
-from firebase_admin import credentials, firestore, storage
-
-# ===================== APP =====================
 app = Flask(__name__, template_folder='templates')
+CORS(app)
 
-# ===================== FIREBASE CONFIG =====================
+# ===================== CONFIGURAÇÕES =====================
 
-# coloque o nome do seu arquivo json aqui
-cred = credentials.Certificate("firebase-key.json")
+UPLOAD_FOLDER = 'static/uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-firebase_admin.initialize_app(cred, {
-    'storageBucket': 'SEU-PROJETO.appspot.com'
-})
+# ===================== MONGODB =====================
 
-db = firestore.client()
-bucket = storage.bucket()
+MONGO_URI = "SUA_URI_MONGODB"
 
-# ===================== API LOCATION =====================
+client = MongoClient(MONGO_URI)
+
+db = client["registros_db"]
+colecao = db["registros"]
+
+# ===================== LOCATIONIQ =====================
+
 LOCATIONIQ_API_KEY = 'SUA_API_KEY'
 
-# ===================== FUNÇÃO ENDEREÇO =====================
+# ===================== FUNÇÕES =====================
+
 def obter_endereco(latitude, longitude):
-    print(f"\n🔍 Buscando endereço: {latitude}, {longitude}")
+    print(f"\n🔍 Tentando obter endereço para: {latitude}, {longitude}")
 
     try:
         url = "https://us1.locationiq.com/v1/reverse"
@@ -45,15 +48,14 @@ def obter_endereco(latitude, longitude):
 
         response = requests.get(url, params=params, timeout=10)
 
-        print(f"Status LocationIQ: {response.status_code}")
+        print(f"LocationIQ Status: {response.status_code}")
 
         if response.status_code == 200:
             data = response.json()
 
-            endereco = data.get(
-                'display_name',
-                'Endereço não encontrado'
-            )
+            endereco = data.get('display_name', 'Não encontrado')
+
+            print(f"✅ LocationIQ sucesso: {endereco[:120]}...")
 
             return {
                 "endereco_completo": endereco,
@@ -61,7 +63,7 @@ def obter_endereco(latitude, longitude):
             }
 
     except Exception as e:
-        print("❌ Erro LocationIQ:", e)
+        print(f"❌ Erro LocationIQ: {e}")
 
     return {
         "endereco_completo": "Não foi possível obter o endereço",
@@ -69,22 +71,26 @@ def obter_endereco(latitude, longitude):
     }
 
 # ===================== ROTAS =====================
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ===================== REGISTRO =====================
 @app.route('/registrar', methods=['POST'])
 def registrar():
 
     try:
-        print("📥 Requisição recebida")
+        print("📥 Requisição recebida - Content-Type:", request.content_type)
 
         data = request.get_json(silent=True)
 
         if data is None:
+            raw_data = request.get_data(as_text=True)
+
+            print("❌ Dados recebidos (raw):", raw_data[:300])
+
             return jsonify({
-                "erro": "JSON inválido"
+                "erro": "Dados JSON inválidos ou vazios."
             }), 400
 
         latitude = data.get('latitude')
@@ -92,24 +98,21 @@ def registrar():
         foto_base64 = data.get('foto')
 
         print(
-            f"📍 Lat: {latitude} | Lon: {longitude}"
+            f"📍 Recebido → Lat: {latitude}, Lon: {longitude}"
         )
-
-        # ===================== VALIDAÇÃO =====================
 
         if not latitude or not longitude or not foto_base64:
             return jsonify({
-                "erro": "Latitude, longitude ou foto ausentes"
+                "erro": "Faltam dados."
             }), 400
 
         # ===================== ENDEREÇO =====================
 
         endereco_info = obter_endereco(latitude, longitude)
 
-        # ===================== FOTO BASE64 =====================
+        # ===================== FOTO =====================
 
         try:
-
             if ',' in foto_base64:
                 header, img_data = foto_base64.split(',', 1)
             else:
@@ -118,36 +121,25 @@ def registrar():
             foto_bytes = base64.b64decode(img_data)
 
         except Exception as e:
-
-            print("❌ Erro Base64:", e)
+            print("❌ Erro ao decodificar foto:", e)
 
             return jsonify({
-                "erro": "Imagem inválida"
+                "erro": "Foto inválida"
             }), 400
-
-        # ===================== NOME FOTO =====================
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         filename = f"registro_{timestamp}.jpg"
 
-        # ===================== UPLOAD FIREBASE STORAGE =====================
-
-        blob = bucket.blob(f"uploads/{filename}")
-
-        blob.upload_from_string(
-            foto_bytes,
-            content_type='image/jpeg'
+        filepath = os.path.join(
+            app.config['UPLOAD_FOLDER'],
+            filename
         )
 
-        # deixa público
-        blob.make_public()
+        with open(filepath, 'wb') as f:
+            f.write(foto_bytes)
 
-        foto_url = blob.public_url
-
-        print("✅ Foto enviada:", foto_url)
-
-        # ===================== REGISTRO FIRESTORE =====================
+        # ===================== REGISTRO =====================
 
         registro = {
             "data_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -155,38 +147,37 @@ def registrar():
             "longitude": float(longitude),
             "endereco": endereco_info.get("endereco_completo"),
             "fonte_endereco": endereco_info.get("fonte"),
-            "foto": foto_url
+            "foto": filename
         }
 
-        db.collection('registros').add(registro)
+        # ===================== SALVA NO MONGODB =====================
 
-        print("✅ Registro salvo no Firestore")
+        colecao.insert_one(registro)
 
-        # ===================== RESPOSTA =====================
+        print(f"✅ Registro salvo no MongoDB! Foto: {filename}")
 
         return jsonify({
             "mensagem": "Registro realizado com sucesso!",
-            "foto": foto_url,
+            "foto": filename,
             "endereco": endereco_info.get("endereco_completo"),
             "fonte": endereco_info.get("fonte")
         })
 
     except Exception as e:
-
         print("❌ ERRO GERAL:", str(e))
 
         import traceback
         traceback.print_exc()
 
         return jsonify({
-            "erro": str(e)
+            "erro": f"Erro interno: {str(e)}"
         }), 500
 
-# ===================== START =====================
+# ===================== SERVIDOR =====================
+
 if __name__ == '__main__':
-
-    print("🚀 Servidor iniciado")
-
+    print("🚀 Servidor rodando...")
+    
     app.run(
         debug=True,
         host='0.0.0.0',
